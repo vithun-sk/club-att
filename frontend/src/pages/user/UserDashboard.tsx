@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useClubData } from '../../context/ClubDataContext';
 import { StatCard } from '../../components/common/StatCard';
 import { Badge } from '../../components/common/Badge';
-import type { ActivePage } from '../../types';
+import type { ActivePage, Member } from '../../types';
 import {
   Flame,
   Award,
@@ -25,8 +25,28 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
   const { currentUser } = useAuth();
   const { events, members, achievements, toggleRSVP } = useClubData();
 
-  // Find the student profile in members roster (Aarav Sharma or default)
-  const studentMember = members.find((m) => m.name === currentUser?.name) || members[0];
+  // A newly registered user may not have a member-roster record yet.
+  // Use a safe profile derived from the authenticated user until real metrics exist.
+  const studentMember: Member = members.find((m) => m.email === currentUser?.email || m.name === currentUser?.name) || members[0] || {
+    id: currentUser?.id || 'current-user',
+    studentId: currentUser?.studentId || 'Not assigned',
+    name: currentUser?.name || 'Member',
+    email: currentUser?.email || '',
+    avatar: currentUser?.avatar || '',
+    department: currentUser?.department || 'Department not set',
+    year: currentUser?.year || '',
+    joinedDate: '',
+    totalEvents: events.length,
+    attendedEvents: 0,
+    attendanceRate: 0,
+    currentStreak: currentUser?.streak || 0,
+    riskLevel: 'low',
+    riskFactors: [],
+    status: 'active',
+    points: currentUser?.points || 0,
+    lastCheckIn: '',
+    attendanceHistory: [],
+  };
   const upcomingEvents = events.filter((e) => e.status === 'upcoming').slice(0, 3);
   const liveEvent = events.find((e) => e.status === 'live');
   const unlockedBadges = achievements.filter((a) => a.unlocked);
@@ -48,18 +68,29 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <img
-            src={currentUser?.avatar || studentMember.avatar}
-            alt={currentUser?.name}
-            style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '3px solid var(--brand-500)',
-              boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)'
-            }}
-          />
+          {(currentUser?.avatar || studentMember.avatar) ? (
+            <img
+              src={currentUser?.avatar || studentMember.avatar}
+              alt={currentUser?.name || studentMember.name}
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '3px solid var(--brand-500)',
+                boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)'
+              }}
+            />
+          ) : (
+            <div aria-label="Member avatar" style={{
+              width: '64px', height: '64px', borderRadius: '50%', display: 'grid',
+              placeItems: 'center', background: 'var(--brand-100, #e0e7ff)',
+              color: 'var(--brand-700, #3730a3)', fontSize: '1.4rem', fontWeight: 700,
+              border: '3px solid var(--brand-500)'
+            }}>
+              {(currentUser?.name || studentMember.name).charAt(0).toUpperCase()}
+            </div>
+          )}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
               <h1 style={{ fontSize: '1.65rem', margin: 0, fontWeight: 800 }}>
