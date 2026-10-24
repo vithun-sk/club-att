@@ -10,11 +10,14 @@ import {
   Plus,
   QrCode,
   Edit2,
+  Trash2,
   CheckCircle2,
   Filter,
   Play,
   RotateCcw,
-  Download
+  Download,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface EventManagementProps {
@@ -22,12 +25,23 @@ interface EventManagementProps {
 }
 
 export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) => {
-  const { events, addEvent, updateEvent, exportEventsCSV } = useClubData();
+  const {
+    events,
+    addEvent,
+    updateEvent,
+    deleteEvent,
+    exportEventsCSV,
+    isLoadingEvents,
+    eventError,
+    refreshEvents,
+  } = useClubData();
   const { showToast } = useToast();
 
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -58,59 +72,101 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
     setIsCreateOpen(true);
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title) {
+    if (!title.trim()) {
+      showToast('Validation Error', 'Event title is required.', 'error');
+      return;
+    }
+    if (Number(capacity) <= 0) {
+      showToast('Validation Error', 'Event capacity must be greater than 0.', 'error');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await addEvent({
+        title: title.trim(),
+        category,
+        date,
+        time,
+        location: location.trim(),
+        status: 'upcoming',
+        description: description.trim(),
+        capacity: Number(capacity),
+        rsvpCount: 0,
+        pointsAwarded: Number(pointsAwarded),
+        qrRefreshInterval: Number(qrRefreshInterval),
+      });
+      setIsCreateOpen(false);
+    } catch {
+      // Error handled by context toast
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (event: EventItem) => {
+    setEditingEvent({ ...event });
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+    if (!editingEvent.title.trim()) {
       showToast('Validation Error', 'Event title is required.', 'error');
       return;
     }
 
-    addEvent({
-      title,
-      category,
-      date,
-      time,
-      location,
-      status: 'upcoming',
-      description,
-      capacity: Number(capacity),
-      rsvpCount: 0,
-      pointsAwarded: Number(pointsAwarded),
-      qrRefreshInterval: Number(qrRefreshInterval)
-    });
-
-    setIsCreateOpen(false);
+    try {
+      setIsSubmitting(true);
+      await updateEvent(editingEvent.id, {
+        title: editingEvent.title.trim(),
+        category: editingEvent.category,
+        date: editingEvent.date,
+        time: editingEvent.time,
+        location: editingEvent.location,
+        description: editingEvent.description,
+        capacity: Number(editingEvent.capacity),
+        pointsAwarded: Number(editingEvent.pointsAwarded),
+        qrRefreshInterval: Number(editingEvent.qrRefreshInterval),
+        status: editingEvent.status,
+      });
+      setEditingEvent(null);
+    } catch {
+      // Error handled by context toast
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOpenEdit = (event: EventItem) => {
-    setEditingEvent(event);
+  const handleDelete = async (event: EventItem) => {
+    if (!window.confirm(`Are you sure you want to delete "${event.title}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setDeletingEventId(event.id);
+      await deleteEvent(event.id);
+    } catch {
+      // Error handled by context toast
+    } finally {
+      setDeletingEventId(null);
+    }
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingEvent) return;
-
-    updateEvent(editingEvent.id, {
-      title: editingEvent.title,
-      category: editingEvent.category,
-      date: editingEvent.date,
-      time: editingEvent.time,
-      location: editingEvent.location,
-      description: editingEvent.description,
-      capacity: Number(editingEvent.capacity),
-      pointsAwarded: Number(editingEvent.pointsAwarded),
-      qrRefreshInterval: Number(editingEvent.qrRefreshInterval),
-      status: editingEvent.status
-    });
-
-    setEditingEvent(null);
-  };
-
-  const handleSetStatus = (event: EventItem, newStatus: 'upcoming' | 'live' | 'completed' | 'cancelled') => {
-    updateEvent(event.id, { status: newStatus });
-    if (newStatus === 'live') {
-      showToast('Session Started', `"${event.title}" is now LIVE! Redirecting to QR Display.`, 'success');
-      onNavigate('qr-live');
+  const handleSetStatus = async (
+    event: EventItem,
+    newStatus: 'upcoming' | 'live' | 'completed' | 'cancelled',
+  ) => {
+    try {
+      await updateEvent(event.id, { status: newStatus });
+      if (newStatus === 'live') {
+        showToast('Session Started', `"${event.title}" is now LIVE! Redirecting to QR Display.`, 'success');
+        onNavigate('qr-live');
+      }
+    } catch {
+      // Error handled by context toast
     }
   };
 
@@ -119,20 +175,32 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.85rem', margin: 0, fontWeight: 800 }}>Event & Session Hub</h1>
-          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem' }}>
-            Schedule club workshops, monitor RSVPs, and broadcast rotating QR stations.
+          <h1 style={{ fontSize: '1.85rem', margin: 0, fontWeight: 800 }}>Event &amp; Session Hub</h1>
+          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Schedule club workshops, monitor real attendance telemetry, and manage live sessions.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button
+            type="button"
+            onClick={refreshEvents}
+            disabled={isLoadingEvents}
+            className="btn btn-secondary"
+            title="Refresh events from server"
+          >
+            <RefreshCw size={14} className={isLoadingEvents ? 'spin' : ''} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
             onClick={exportEventsCSV}
             className="btn btn-outline"
           >
             <Download size={15} /> Export Events (CSV)
           </button>
           <button
+            type="button"
             onClick={handleOpenCreate}
             className="btn btn-primary"
           >
@@ -140,6 +208,30 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
           </button>
         </div>
       </div>
+
+      {/* Error Alert Banner */}
+      {eventError && (
+        <div
+          style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.85rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', fontSize: '0.85rem' }}>
+            <AlertTriangle size={16} />
+            <span>{eventError}</span>
+          </div>
+          <button type="button" onClick={refreshEvents} className="btn btn-sm btn-secondary">
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div
@@ -150,7 +242,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '1rem'
+          gap: '1rem',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -161,6 +253,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
           {(['ALL', 'live', 'upcoming', 'completed', 'cancelled'] as const).map((st) => (
             <button
               key={st}
+              type="button"
               onClick={() => setStatusFilter(st)}
               className={`btn btn-sm ${statusFilter === st ? 'btn-primary' : 'btn-ghost'}`}
               style={{ textTransform: 'capitalize', fontSize: '0.785rem' }}
@@ -172,9 +265,33 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
         </div>
 
         <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-          Showing <strong>{filteredEvents.length}</strong> events
+          Showing <strong>{filteredEvents.length}</strong> {events.length === 1 ? 'event' : 'events'}
         </div>
       </div>
+
+      {/* Loading State */}
+      {isLoadingEvents && events.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-dim)' }}>
+          <RefreshCw size={36} className="spin" style={{ margin: '0 auto 1rem auto', color: 'var(--brand-400)' }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>Loading real events from server...</p>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoadingEvents && events.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1.5rem', color: 'var(--text-dim)' }}>
+          <Calendar size={44} style={{ margin: '0 auto 1rem auto', opacity: 0.35 }} />
+          <h3 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem 0', color: 'var(--text-main)', fontWeight: 700 }}>
+            No Club Events Found
+          </h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 1.25rem 0', maxWidth: '420px', marginLeft: 'auto', marginRight: 'auto' }}>
+            Get started by scheduling your club&apos;s first workshop, tech talk, or hackathon session.
+          </p>
+          <button type="button" onClick={handleOpenCreate} className="btn btn-primary">
+            <Plus size={15} /> Schedule First Event
+          </button>
+        </div>
+      )}
 
       {/* Events Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1.5rem' }}>
@@ -182,7 +299,9 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
           const isLive = event.status === 'live';
           const isCompleted = event.status === 'completed';
           const isUpcoming = event.status === 'upcoming';
-          const attendancePercent = event.capacity > 0 ? Math.round((event.actualAttendance / event.capacity) * 100) : 0;
+          const isDeleting = deletingEventId === event.id;
+          const attendancePercent =
+            event.capacity > 0 ? Math.round((event.actualAttendance / event.capacity) * 100) : 0;
 
           return (
             <div
@@ -195,7 +314,8 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                 borderColor: isLive ? 'rgba(16, 185, 129, 0.4)' : undefined,
                 background: isLive
                   ? 'linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, var(--bg-surface) 100%)'
-                  : 'var(--bg-surface)'
+                  : 'var(--bg-surface)',
+                opacity: isDeleting ? 0.5 : 1,
               }}
             >
               <div>
@@ -218,12 +338,12 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                   </Badge>
                 </div>
 
-                <h3 style={{ fontSize: '1.15rem', margin: '0 0 0.5rem 0', lineHeight: 1.3 }}>
+                <h3 style={{ fontSize: '1.15rem', margin: '0 0 0.5rem 0', lineHeight: 1.3, fontWeight: 700 }}>
                   {event.title}
                 </h3>
 
                 <p style={{ fontSize: '0.835rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
-                  {event.description}
+                  {event.description || 'No description provided.'}
                 </p>
 
                 {/* Date & Location Metas */}
@@ -245,11 +365,11 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                     borderRadius: 'var(--radius-md)',
                     background: 'rgba(255, 255, 255, 0.02)',
                     border: '1px solid var(--border-subtle)',
-                    marginBottom: '1.25rem'
+                    marginBottom: '1.25rem',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.785rem', marginBottom: '0.4rem' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Attendance & Capacity</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Verified Attendance &amp; Capacity</span>
                     <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                       {event.actualAttendance} / {event.capacity} ({attendancePercent}%)
                     </span>
@@ -259,21 +379,22 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                       style={{
                         height: '100%',
                         width: `${Math.min(100, attendancePercent)}%`,
-                        backgroundColor: isLive ? 'var(--success)' : 'var(--brand-500)'
+                        backgroundColor: isLive ? 'var(--success)' : 'var(--brand-500)',
                       }}
                     />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '0.4rem' }}>
-                    <span>RSVPs: {event.rsvpCount}</span>
+                    <span>Event ID: #{event.id}</span>
                     <span>+{event.pointsAwarded} XP reward</span>
                   </div>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)' }}>
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <button
+                    type="button"
                     onClick={() => handleOpenEdit(event)}
                     className="btn btn-outline btn-sm"
                     title="Edit event details"
@@ -283,6 +404,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
 
                   {isUpcoming && (
                     <button
+                      type="button"
                       onClick={() => handleSetStatus(event, 'live')}
                       className="btn btn-primary btn-sm"
                       style={{ background: 'var(--success)', borderColor: 'var(--success)' }}
@@ -293,6 +415,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
 
                   {isLive && (
                     <button
+                      type="button"
                       onClick={() => handleSetStatus(event, 'completed')}
                       className="btn btn-secondary btn-sm"
                     >
@@ -302,6 +425,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
 
                   {isCompleted && (
                     <button
+                      type="button"
                       onClick={() => handleSetStatus(event, 'upcoming')}
                       className="btn btn-ghost btn-sm"
                       title="Reopen event"
@@ -309,11 +433,24 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                       <RotateCcw size={13} /> Reopen
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(event)}
+                    disabled={isDeleting}
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: '#ef4444' }}
+                    title="Delete event permanently"
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => onNavigate('qr-live')}
                   className="btn btn-secondary btn-sm"
+                  title="Launch Live QR Attendance Station"
                 >
                   <QrCode size={13} /> QR Screen
                 </button>
@@ -360,19 +497,6 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
             </div>
 
             <div className="form-group">
-              <label className="form-label">Points Awarded (XP)</label>
-              <input
-                type="number"
-                required
-                className="form-input"
-                value={pointsAwarded}
-                onChange={(e) => setPointsAwarded(Number(e.target.value))}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div className="form-group">
               <label className="form-label">Date</label>
               <input
                 type="date"
@@ -382,70 +506,82 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
-
-            <div className="form-group">
-              <label className="form-label">Time</label>
-              <input
-                type="text"
-                required
-                className="form-input"
-                placeholder="17:00 - 19:30"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-              />
-            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div className="form-group">
-              <label className="form-label">Location / Room</label>
+              <label className="form-label">Time Window</label>
               <input
                 type="text"
                 required
                 className="form-input"
-                placeholder="Auditorium Hall B"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                placeholder="17:00 - 19:00"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Capacity (Seats)</label>
+              <label className="form-label">Venue / Room</label>
+              <input
+                type="text"
+                required
+                className="form-input"
+                placeholder="Innovation Lab Hall B"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Session Description</label>
+            <textarea
+              className="form-input"
+              rows={3}
+              placeholder="Summary of topics, prerequisites, and learning outcomes..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+            <div className="form-group">
+              <label className="form-label">Capacity</label>
               <input
                 type="number"
                 required
+                min={1}
                 className="form-input"
                 value={capacity}
                 onChange={(e) => setCapacity(Number(e.target.value))}
               />
             </div>
-          </div>
 
-          <div className="form-group">
-            <label className="form-label">
-              <span>QR Code Rotation Cadence (seconds)</span>
-              <span style={{ color: 'var(--brand-500)', fontWeight: 600 }}>{qrRefreshInterval}s refresh</span>
-            </label>
-            <input
-              type="number"
-              min={5}
-              max={60}
-              required
-              className="form-input"
-              value={qrRefreshInterval}
-              onChange={(e) => setQrRefreshInterval(Number(e.target.value))}
-            />
-          </div>
+            <div className="form-group">
+              <label className="form-label">XP Points</label>
+              <input
+                type="number"
+                required
+                min={1}
+                className="form-input"
+                value={pointsAwarded}
+                onChange={(e) => setPointsAwarded(Number(e.target.value))}
+              />
+            </div>
 
-          <div className="form-group">
-            <label className="form-label">Description</label>
-            <textarea
-              rows={3}
-              className="form-textarea"
-              placeholder="Outline topics covered and prerequisite tools..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+            <div className="form-group">
+              <label className="form-label">QR Cadence (s)</label>
+              <input
+                type="number"
+                required
+                min={5}
+                max={60}
+                className="form-input"
+                value={qrRefreshInterval}
+                onChange={(e) => setQrRefreshInterval(Number(e.target.value))}
+              />
+            </div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
@@ -458,9 +594,10 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
             </button>
             <button
               type="submit"
+              disabled={isSubmitting}
               className="btn btn-primary"
             >
-              Schedule Event
+              {isSubmitting ? 'Scheduling...' : 'Schedule Event'}
             </button>
           </div>
         </form>
@@ -547,6 +684,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                 <input
                   type="number"
                   required
+                  min={1}
                   className="form-input"
                   value={editingEvent.capacity}
                   onChange={(e) => setEditingEvent({ ...editingEvent, capacity: Number(e.target.value) })}
@@ -558,6 +696,7 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
                 <input
                   type="number"
                   required
+                  min={1}
                   className="form-input"
                   value={editingEvent.pointsAwarded}
                   onChange={(e) => setEditingEvent({ ...editingEvent, pointsAwarded: Number(e.target.value) })}
@@ -575,9 +714,10 @@ export const EventManagement: React.FC<EventManagementProps> = ({ onNavigate }) 
               </button>
               <button
                 type="submit"
+                disabled={isSubmitting}
                 className="btn btn-primary"
               >
-                Update Event
+                {isSubmitting ? 'Updating...' : 'Update Event'}
               </button>
             </div>
           </form>

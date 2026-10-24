@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { useAuth } from '../../context/AuthContext';
 import { useClubData } from '../../context/ClubDataContext';
 import { Badge } from '../../components/common/Badge';
@@ -25,6 +26,15 @@ export const UserPassPage: React.FC = () => {
   }, []);
 
   const passToken = `CP_PASS_${student.studentId}_${student.id.toUpperCase()}_AUTH`;
+  const [passQrDataUrl, setPassQrDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    QRCode.toDataURL(passToken, {
+      width: 180,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' },
+    }).then(setPassQrDataUrl).catch(console.error);
+  }, [passToken]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(passToken);
@@ -135,57 +145,20 @@ export const UserPassPage: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             boxShadow: '0 4px 15px rgba(0, 0, 0, 0.4)',
-            marginBottom: '1.25rem'
+            marginBottom: '1.25rem',
+            minHeight: '180px',
+            minWidth: '180px',
           }}
         >
-          <svg width="180" height="180" viewBox="0 0 180 180">
-            <rect width="180" height="180" fill="#ffffff" rx="6" />
-            {/* Standard QR Framing */}
-            <rect x="15" y="15" width="40" height="40" fill="#000000" rx="3" />
-            <rect x="22" y="22" width="26" height="26" fill="#ffffff" rx="2" />
-            <rect x="27" y="27" width="16" height="16" fill="#000000" rx="2" />
-
-            <rect x="125" y="15" width="40" height="40" fill="#000000" rx="3" />
-            <rect x="132" y="22" width="26" height="26" fill="#ffffff" rx="2" />
-            <rect x="137" y="27" width="16" height="16" fill="#000000" rx="2" />
-
-            <rect x="15" y="125" width="40" height="40" fill="#000000" rx="3" />
-            <rect x="22" y="132" width="26" height="26" fill="#ffffff" rx="2" />
-            <rect x="27" y="137" width="16" height="16" fill="#000000" rx="2" />
-
-            {/* Simulated Data Points */}
-            {[
-              { x: 65, y: 20, w: 10, h: 10 },
-              { x: 85, y: 20, w: 20, h: 10 },
-              { x: 65, y: 40, w: 20, h: 10 },
-              { x: 95, y: 40, w: 15, h: 15 },
-              { x: 20, y: 65, w: 10, h: 20 },
-              { x: 40, y: 65, w: 15, h: 10 },
-              { x: 65, y: 65, w: 10, h: 10 },
-              { x: 85, y: 65, w: 25, h: 10 },
-              { x: 120, y: 65, w: 10, h: 20 },
-              { x: 140, y: 65, w: 20, h: 10 },
-              { x: 20, y: 95, w: 20, h: 10 },
-              { x: 50, y: 95, w: 10, h: 20 },
-              { x: 70, y: 85, w: 20, h: 20 },
-              { x: 100, y: 95, w: 10, h: 10 },
-              { x: 120, y: 85, w: 20, h: 20 },
-              { x: 150, y: 95, w: 10, h: 10 },
-              { x: 65, y: 120, w: 15, h: 15 },
-              { x: 90, y: 120, w: 15, h: 10 },
-              { x: 115, y: 120, w: 20, h: 10 },
-              { x: 145, y: 120, w: 15, h: 20 },
-              { x: 65, y: 145, w: 20, h: 10 },
-              { x: 95, y: 145, w: 10, h: 20 },
-              { x: 115, y: 145, w: 20, h: 10 }
-            ].map((p, i) => (
-              <rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} fill="#000000" rx="1" />
-            ))}
-
-            {/* Center Logo */}
-            <rect x="75" y="75" width="30" height="30" fill="#6366f1" rx="4" />
-            <text x="90" y="95" fill="#ffffff" fontSize="11" fontWeight="800" textAnchor="middle">CP</text>
-          </svg>
+          {passQrDataUrl ? (
+            <img
+              src={passQrDataUrl}
+              alt="Digital Club Pass QR Code"
+              style={{ width: '180px', height: '180px', display: 'block', borderRadius: '4px' }}
+            />
+          ) : (
+            <div style={{ color: '#64748b', fontSize: '0.8rem' }}>Generating Pass QR...</div>
+          )}
         </div>
 
         {/* Rolling Refresh Notice */}

@@ -15,7 +15,9 @@ import {
   XCircle,
   Clock,
   Eye,
-  Download
+  Download,
+  RefreshCw,
+  Users,
 } from 'lucide-react';
 
 interface MemberManagementProps {
@@ -23,7 +25,15 @@ interface MemberManagementProps {
 }
 
 export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemberId }) => {
-  const { members, addMember, updateMemberStatus, exportMembersCSV } = useClubData();
+  const {
+    members,
+    addMember,
+    updateMemberStatus,
+    exportMembersCSV,
+    isLoadingMembers,
+    memberError,
+    refreshMembers,
+  } = useClubData();
   const { showToast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,6 +46,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
     return null;
   });
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // New member form fields
   const [newName, setNewName] = useState('');
@@ -59,37 +70,55 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
     });
   }, [members, searchTerm, departmentFilter, statusFilter]);
 
-  const handleAddMemberSubmit = (e: React.FormEvent) => {
+  const handleAddMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newEmail || !newStudentId) {
+    if (!newName.trim() || !newEmail.trim()) {
       showToast('Validation Error', 'Please complete all required fields.', 'error');
       return;
     }
 
-    addMember({
-      name: newName,
-      email: newEmail,
-      studentId: newStudentId,
-      department: newDepartment,
-      year: newYear,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
-      joinedDate: new Date().toISOString().slice(0, 10),
-      riskLevel: 'low',
-      riskFactors: [],
-      status: 'active'
-    });
+    try {
+      setIsSubmitting(true);
+      await addMember({
+        name: newName.trim(),
+        email: newEmail.trim().toLowerCase(),
+        studentId: newStudentId.trim() || undefined,
+        department: newDepartment,
+        year: newYear,
+        status: 'active',
+      });
 
-    setNewName('');
-    setNewEmail('');
-    setNewStudentId('');
-    setIsAddMemberOpen(false);
+      setNewName('');
+      setNewEmail('');
+      setNewStudentId('');
+      setIsAddMemberOpen(false);
+    } catch {
+      // Handled by context toast
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStatusChange = async (member: Member, newStatus: 'active' | 'at-risk' | 'inactive') => {
+    try {
+      await updateMemberStatus(member.id, newStatus);
+      if (activeMemberModal && activeMemberModal.id === member.id) {
+        setActiveMemberModal({
+          ...activeMemberModal,
+          status: newStatus,
+          riskLevel: newStatus === 'at-risk' ? 'high' : newStatus === 'inactive' ? 'high' : 'low',
+        });
+      }
+    } catch {
+      // Handled by context toast
+    }
   };
 
   const handleSendReminder = (member: Member) => {
     showToast(
       'Engagement Alert Sent',
       `Sent motivational check-in note to ${member.name} (${member.email}).`,
-      'success'
+      'success',
     );
   };
 
@@ -98,20 +127,32 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
       {/* Top Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.85rem', margin: 0, fontWeight: 800 }}>Member Roster & Health</h1>
-          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem' }}>
-            Track participation tiers, streaks, risk factors, and member attendance logs.
+          <h1 style={{ fontSize: '1.85rem', margin: 0, fontWeight: 800 }}>Member Roster &amp; Health</h1>
+          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Track real participation tiers, streaks, risk factors, and member attendance logs.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button
+            type="button"
+            onClick={refreshMembers}
+            disabled={isLoadingMembers}
+            className="btn btn-secondary"
+            title="Refresh members from database"
+          >
+            <RefreshCw size={14} className={isLoadingMembers ? 'spin' : ''} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
             onClick={exportMembersCSV}
             className="btn btn-outline"
           >
             <Download size={15} /> Export Roster (CSV)
           </button>
           <button
+            type="button"
             onClick={() => setIsAddMemberOpen(true)}
             className="btn btn-primary"
           >
@@ -119,6 +160,30 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
           </button>
         </div>
       </div>
+
+      {/* Error Alert Banner */}
+      {memberError && (
+        <div
+          style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.85rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', fontSize: '0.85rem' }}>
+            <AlertTriangle size={16} />
+            <span>{memberError}</span>
+          </div>
+          <button type="button" onClick={refreshMembers} className="btn btn-sm btn-secondary">
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div
@@ -129,7 +194,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
           flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: '1rem'
+          gap: '1rem',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: '260px' }}>
@@ -138,7 +203,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
               type="text"
               className="form-input"
               style={{ paddingLeft: '2.4rem' }}
-              placeholder="Search by name, student ID, or campus email..."
+              placeholder="Search by name, email, or student ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -150,161 +215,195 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.825rem', color: 'var(--text-dim)' }}>
-            <Filter size={15} /> Filters:
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+            <Filter size={14} /> Department:
           </div>
-
           <select
             className="form-select"
-            style={{ width: 'auto', fontSize: '0.825rem', padding: '0.5rem 0.85rem' }}
+            style={{ width: 'auto', fontSize: '0.825rem', padding: '0.45rem 0.85rem' }}
             value={departmentFilter}
             onChange={(e) => setDepartmentFilter(e.target.value)}
           >
             <option value="ALL">All Departments</option>
             <option value="Computer Science">Computer Science</option>
+            <option value="Electrical Engineering">Electrical Engineering</option>
             <option value="Data Science">Data Science</option>
-            <option value="Artificial Intelligence">AI & ML</option>
-            <option value="Information Tech">Information Tech</option>
-            <option value="Mechanical Eng.">Mechanical Eng.</option>
+            <option value="Software Engineering">Software Engineering</option>
           </select>
 
           <select
             className="form-select"
-            style={{ width: 'auto', fontSize: '0.825rem', padding: '0.5rem 0.85rem' }}
+            style={{ width: 'auto', fontSize: '0.825rem', padding: '0.45rem 0.85rem' }}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="ALL">All Statuses</option>
-            <option value="active">Active Members</option>
-            <option value="at-risk">At-Risk Members</option>
-            <option value="inactive">Inactive Members</option>
+            <option value="active">Active</option>
+            <option value="at-risk">At-Risk</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
       </div>
 
+      {/* Loading State */}
+      {isLoadingMembers && members.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-dim)' }}>
+          <RefreshCw size={36} className="spin" style={{ margin: '0 auto 1rem auto', color: 'var(--brand-400)' }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>Loading club members from database...</p>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoadingMembers && members.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1.5rem', color: 'var(--text-dim)' }}>
+          <Users size={44} style={{ margin: '0 auto 1rem auto', opacity: 0.35 }} />
+          <h3 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem 0', color: 'var(--text-main)', fontWeight: 700 }}>
+            No Members Registered
+          </h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 1.25rem 0', maxWidth: '420px', marginLeft: 'auto', marginRight: 'auto' }}>
+            Register new members to begin tracking participation rates, streaks, and attendance integrity.
+          </p>
+          <button type="button" onClick={() => setIsAddMemberOpen(true)} className="btn btn-primary">
+            <UserPlus size={15} /> Add First Member
+          </button>
+        </div>
+      )}
+
       {/* Members Table */}
-      <div className="table-container">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Member Details</th>
-              <th>Department & Year</th>
-              <th>Attendance Rate</th>
-              <th>Current Streak</th>
-              <th>Risk Level</th>
-              <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredMembers.length === 0 ? (
+      {members.length > 0 && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-dim)' }}>
-                  No members found matching your search or filters.
-                </td>
+                <th>Member</th>
+                <th>Student ID</th>
+                <th>Department &amp; Year</th>
+                <th>Attendance Rate</th>
+                <th>Events Attended</th>
+                <th>Current Streak</th>
+                <th>Risk Profile</th>
+                <th>Status</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
-            ) : (
-              filteredMembers.map((member) => (
-                <tr key={member.id}>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                      <img
-                        src={member.avatar}
-                        alt={member.name}
-                        style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
-                      />
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.885rem' }}>
-                          {member.name}
-                        </div>
-                        <div style={{ fontSize: '0.745rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                          {member.studentId} &bull; {member.email}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td>
-                    <div style={{ fontSize: '0.845rem', color: 'var(--text-main)' }}>{member.department}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{member.year}</div>
-                  </td>
-
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                      <div style={{ width: '55px', height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '999px', overflow: 'hidden' }}>
-                        <div
-                          style={{
-                            height: '100%',
-                            width: `${member.attendanceRate}%`,
-                            backgroundColor:
-                              member.attendanceRate >= 75
-                                ? 'var(--success)'
-                                : member.attendanceRate >= 60
-                                ? 'var(--warning)'
-                                : 'var(--danger)'
-                          }}
-                        />
-                      </div>
-                      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '0.84rem' }}>
-                        {member.attendanceRate}%
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.15rem' }}>
-                      {member.attendedEvents} of {member.totalEvents} events
-                    </div>
-                  </td>
-
-                  <td>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontWeight: 600, fontSize: '0.84rem', color: member.currentStreak > 0 ? '#f59e0b' : 'var(--text-dim)' }}>
-                      <Flame size={14} />
-                      <span>{member.currentStreak} events</span>
-                    </div>
-                  </td>
-
-                  <td>
-                    <Badge
-                      variant={
-                        member.riskLevel === 'low'
-                          ? 'success'
-                          : member.riskLevel === 'medium'
-                          ? 'warning'
-                          : 'danger'
-                      }
-                    >
-                      {member.riskLevel} risk
-                    </Badge>
-                  </td>
-
-                  <td>
-                    <Badge
-                      variant={
-                        member.status === 'active'
-                          ? 'brand'
-                          : member.status === 'at-risk'
-                          ? 'danger'
-                          : 'neutral'
-                      }
-                    >
-                      {member.status}
-                    </Badge>
-                  </td>
-
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      onClick={() => setActiveMemberModal(member)}
-                      className="btn btn-secondary btn-sm"
-                      style={{ fontSize: '0.745rem' }}
-                    >
-                      <Eye size={13} /> Details
-                    </button>
+            </thead>
+            <tbody>
+              {filteredMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-dim)' }}>
+                    No members match your search criteria.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                filteredMembers.map((member) => (
+                  <tr key={member.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <img
+                          src={member.avatar}
+                          alt={member.name}
+                          style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.875rem' }}>
+                            {member.name}
+                          </div>
+                          <div style={{ fontSize: '0.745rem', color: 'var(--text-dim)' }}>
+                            {member.email}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.825rem' }}>
+                      {member.studentId}
+                    </td>
+
+                    <td>
+                      <div style={{ fontSize: '0.825rem' }}>{member.department}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{member.year}</div>
+                    </td>
+
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <div style={{ width: '60px', height: '5px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${member.attendanceRate}%`,
+                              backgroundColor:
+                                member.attendanceRate >= 75
+                                  ? 'var(--success)'
+                                  : member.attendanceRate >= 50
+                                  ? 'var(--warning)'
+                                  : 'var(--danger)',
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: '0.825rem', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                          {member.attendanceRate}%
+                        </span>
+                      </div>
+                    </td>
+
+                    <td style={{ fontSize: '0.85rem' }}>
+                      <strong>{member.attendedEvents}</strong>
+                      <span style={{ color: 'var(--text-dim)' }}> / {member.totalEvents}</span>
+                    </td>
+
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+                        <Flame size={14} color="#f59e0b" />
+                        <strong>{member.currentStreak}</strong>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>sessions</span>
+                      </div>
+                    </td>
+
+                    <td>
+                      <Badge
+                        variant={
+                          member.riskLevel === 'low'
+                            ? 'success'
+                            : member.riskLevel === 'medium'
+                            ? 'warning'
+                            : 'danger'
+                        }
+                      >
+                        {member.riskLevel} risk
+                      </Badge>
+                    </td>
+
+                    <td>
+                      <Badge
+                        variant={
+                          member.status === 'active'
+                            ? 'brand'
+                            : member.status === 'at-risk'
+                            ? 'danger'
+                            : 'neutral'
+                        }
+                      >
+                        {member.status}
+                      </Badge>
+                    </td>
+
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMemberModal(member)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.745rem' }}
+                      >
+                        <Eye size={13} /> Details
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Member Details Modal */}
       {activeMemberModal && (
@@ -325,7 +424,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
                 padding: '1rem',
                 borderRadius: 'var(--radius-md)',
                 background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid var(--border-subtle)'
+                border: '1px solid var(--border-subtle)',
               }}
             >
               <img
@@ -340,58 +439,52 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
                     {activeMemberModal.status}
                   </Badge>
                 </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  {activeMemberModal.email} &bull; Joined {activeMemberModal.joinedDate}
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                  {activeMemberModal.email} &bull; {activeMemberModal.year}
                 </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--brand-500)', fontFamily: 'var(--font-mono)' }}>
-                  {activeMemberModal.points}
-                </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Club Points</div>
               </div>
             </div>
 
             {/* Attendance & Streak Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', textAlign: 'center' }}>
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+              <div className="card" style={{ padding: '0.85rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>
                   {activeMemberModal.attendanceRate}%
                 </div>
                 <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Attendance Rate</div>
               </div>
 
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f59e0b' }}>
-                  {activeMemberModal.currentStreak} 🔥
+              <div className="card" style={{ padding: '0.85rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-400)', fontFamily: 'var(--font-mono)' }}>
+                  {activeMemberModal.attendedEvents} / {activeMemberModal.totalEvents}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Consecutive Streak</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Events Attended</div>
               </div>
 
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                  {activeMemberModal.attendedEvents}/{activeMemberModal.totalEvents}
+              <div className="card" style={{ padding: '0.85rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f59e0b', fontFamily: 'var(--font-mono)' }}>
+                  {activeMemberModal.currentStreak}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Sessions Attended</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Streak Count</div>
               </div>
             </div>
 
-            {/* Risk Factor Explainability */}
+            {/* Risk Warnings */}
             {activeMemberModal.riskFactors.length > 0 && (
               <div
                 style={{
-                  background: 'var(--danger-bg)',
-                  border: '1px solid var(--danger-border)',
+                  padding: '0.85rem',
                   borderRadius: 'var(--radius-md)',
-                  padding: '0.85rem 1rem'
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--danger)', fontWeight: 700, fontSize: '0.825rem', marginBottom: '0.35rem' }}>
-                  <AlertTriangle size={15} /> Identified Retention Risk Signals
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#ef4444', fontSize: '0.825rem', fontWeight: 700, marginBottom: '0.35rem' }}>
+                  <AlertTriangle size={14} /> At-Risk Attendance Factors
                 </div>
-                <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.785rem', color: 'var(--text-main)', lineHeight: 1.5 }}>
-                  {activeMemberModal.riskFactors.map((factor, idx) => (
-                    <li key={idx}>{factor}</li>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                  {activeMemberModal.riskFactors.map((rf, i) => (
+                    <li key={i}>{rf}</li>
                   ))}
                 </ul>
               </div>
@@ -399,13 +492,13 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
 
             {/* Attendance History Log */}
             <div>
-              <h5 style={{ fontSize: '0.885rem', margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>
-                Session History
-              </h5>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.65rem' }}>
+                Attendance Record History
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '180px', overflowY: 'auto' }}>
                 {activeMemberModal.attendanceHistory.length === 0 ? (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', padding: '0.5rem' }}>
-                    No recorded session history yet for this member.
+                  <div style={{ fontSize: '0.785rem', color: 'var(--text-dim)', textAlign: 'center', padding: '1rem' }}>
+                    No session attendance recorded in database yet.
                   </div>
                 ) : (
                   activeMemberModal.attendanceHistory.map((rec, i) => (
@@ -419,7 +512,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
                         background: 'rgba(255, 255, 255, 0.02)',
                         border: '1px solid var(--border-subtle)',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.8rem'
+                        fontSize: '0.8rem',
                       }}
                     >
                       <div>
@@ -448,23 +541,24 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    updateMemberStatus(activeMemberModal.id, 'active');
-                    setActiveMemberModal({ ...activeMemberModal, status: 'active', riskLevel: 'low' });
-                  }}
+                  onClick={() => handleStatusChange(activeMemberModal, 'active')}
                   className="btn btn-secondary btn-sm"
                 >
                   Mark Active
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    updateMemberStatus(activeMemberModal.id, 'at-risk');
-                    setActiveMemberModal({ ...activeMemberModal, status: 'at-risk', riskLevel: 'high' });
-                  }}
+                  onClick={() => handleStatusChange(activeMemberModal, 'at-risk')}
                   className="btn btn-secondary btn-sm"
                 >
                   Flag At-Risk
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange(activeMemberModal, 'inactive')}
+                  className="btn btn-ghost btn-sm"
+                >
+                  Set Inactive
                 </button>
               </div>
 
@@ -473,7 +567,7 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
                 onClick={() => handleSendReminder(activeMemberModal)}
                 className="btn btn-primary btn-sm"
               >
-                <Mail size={14} /> Send Personalized Note
+                <Mail size={13} /> Send Alert
               </button>
             </div>
           </div>
@@ -484,8 +578,8 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
       <Modal
         isOpen={isAddMemberOpen}
         onClose={() => setIsAddMemberOpen(false)}
-        title="Add New Club Member"
-        subtitle="Register a new student to the official club roster."
+        title="Register New Club Member"
+        subtitle="Add a student to the official club membership database."
       >
         <form onSubmit={handleAddMemberSubmit}>
           <div className="form-group">
@@ -494,37 +588,36 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
               type="text"
               required
               className="form-input"
-              placeholder="e.g. Sanya Mirza"
+              placeholder="e.g. Elena Rostova"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label">Campus Email</label>
+            <label className="form-label">Email Address</label>
             <input
               type="email"
               required
               className="form-input"
-              placeholder="sanya.m@campus.edu"
+              placeholder="student@university.edu"
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div className="form-group">
-              <label className="form-label">Student ID / Roll No</label>
-              <input
-                type="text"
-                required
-                className="form-input"
-                placeholder="CS2025-108"
-                value={newStudentId}
-                onChange={(e) => setNewStudentId(e.target.value)}
-              />
-            </div>
+          <div className="form-group">
+            <label className="form-label">Student ID</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g. CP-9012"
+              value={newStudentId}
+              onChange={(e) => setNewStudentId(e.target.value)}
+            />
+          </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div className="form-group">
               <label className="form-label">Department</label>
               <select
@@ -533,29 +626,30 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
                 onChange={(e) => setNewDepartment(e.target.value)}
               >
                 <option value="Computer Science">Computer Science</option>
+                <option value="Electrical Engineering">Electrical Engineering</option>
                 <option value="Data Science">Data Science</option>
-                <option value="Artificial Intelligence">AI & ML</option>
-                <option value="Information Tech">Information Tech</option>
-                <option value="Mechanical Eng.">Mechanical Eng.</option>
+                <option value="Software Engineering">Software Engineering</option>
+                <option value="Information Systems">Information Systems</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Class Year</label>
+              <select
+                className="form-select"
+                value={newYear}
+                onChange={(e) => setNewYear(e.target.value)}
+              >
+                <option value="Freshman (1st Year)">Freshman (1st Year)</option>
+                <option value="Sophomore (2nd Year)">Sophomore (2nd Year)</option>
+                <option value="Junior (3rd Year)">Junior (3rd Year)</option>
+                <option value="Senior (4th Year)">Senior (4th Year)</option>
+                <option value="Graduate / Alum">Graduate / Alum</option>
               </select>
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Academic Year</label>
-            <select
-              className="form-select"
-              value={newYear}
-              onChange={(e) => setNewYear(e.target.value)}
-            >
-              <option value="Freshman (1st Year)">Freshman (1st Year)</option>
-              <option value="Sophomore (2nd Year)">Sophomore (2nd Year)</option>
-              <option value="Junior (3rd Year)">Junior (3rd Year)</option>
-              <option value="Senior (4th Year)">Senior (4th Year)</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
             <button
               type="button"
               onClick={() => setIsAddMemberOpen(false)}
@@ -565,9 +659,10 @@ export const MemberManagement: React.FC<MemberManagementProps> = ({ selectedMemb
             </button>
             <button
               type="submit"
+              disabled={isSubmitting}
               className="btn btn-primary"
             >
-              Save Member
+              {isSubmitting ? 'Registering...' : 'Register Member'}
             </button>
           </div>
         </form>

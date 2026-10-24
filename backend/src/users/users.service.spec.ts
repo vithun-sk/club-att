@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service.js';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { User } from './entities/user.entity.js';
+import { Attendance } from '../attendance/entities/attendance.entity.js';
+import { Event } from '../events/entities/event.entity.js';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -9,7 +13,15 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         {
-          provide: 'UserRepository',
+          provide: getRepositoryToken(User),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(Attendance),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(Event),
           useValue: {},
         },
       ],

@@ -1,41 +1,140 @@
-import React, { useState, useEffect } from 'react';
-import { useClubData } from '../../context/ClubDataContext';
+import React, { useState, useEffect, useCallback } from 'react';
+import QRCode from 'qrcode';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { useClubData } from '../../context/ClubDataContext';
 import { Badge } from '../../components/common/Badge';
-import type { EventItem } from '../../types';
+import { QRScanner } from '../../components/QRScanner';
+import {
+  generateQrToken,
+  scanAttendance,
+  AttendanceApiError,
+} from '../../api/client';
+import type { EventItem, CheckIn } from '../../types';
 import {
   QrCode,
   CheckCircle2,
-  Sparkles,
-  Zap
+  AlertCircle,
+  AlertTriangle,
+  Clock,
+  RefreshCw,
+  Copy,
+  Check,
+  Keyboard,
+  ShieldCheck,
+  Send,
+  Calendar,
 } from 'lucide-react';
 
+interface VerificationResult {
+  type: 'success' | 'warning' | 'error';
+  title: string;
+  detail: string;
+  timestamp: string;
+}
+
 export const QRAttendancePage: React.FC = () => {
-  const { events, members, checkIns, simulateCheckIn } = useClubData();
+  const { token: authToken, currentUser } = useAuth();
   const { showToast } = useToast();
+  const { events, checkIns: contextCheckIns, isLoadingEvents } = useClubData();
 
-  // Find live event or fall back to first event
-  const liveEvent = events.find((e) => e.status === 'live') || events[0];
-  const [selectedEventId, setSelectedEventId] = useState<string>(liveEvent ? liveEvent.id : '');
+  // Selected event state: bound to real backend events
+  const [selectedEventId, setSelectedEventId] = useState<string>('');
 
-  const currentEvent: EventItem | undefined = events.find((e) => e.id === selectedEventId) || liveEvent;
+  useEffect(() => {
+    if (events.length > 0 && (!selectedEventId || !events.some((e) => e.id === selectedEventId))) {
+      const active = events.find((e) => e.status === 'live') || events[0];
+      if (active) {
+        setSelectedEventId(active.id);
+      }
+    }
+  }, [events, selectedEventId]);
 
-  // Rotation timer state
+  const currentEvent: EventItem | undefined = events.find((e) => e.id === selectedEventId) || events[0];
+
+  // Real server QR token & QR data URL
+  const [serverToken, setServerToken] = useState<string>('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [isGeneratingQr, setIsGeneratingQr] = useState<boolean>(false);
+  const [qrGenerationError, setQrGenerationError] = useState<string | null>(null);
+
+  // Rotation cadence & countdown (in seconds)
   const intervalSeconds = currentEvent ? currentEvent.qrRefreshInterval : 10;
-  const [timeLeft, setTimeLeft] = useState(intervalSeconds);
-  const [tokenHash, setTokenHash] = useState(() => `qr_pulse_${Math.random().toString(36).substring(2, 9)}`);
-  const [rotationCount, setRotationCount] = useState(1);
-  const [selectedSimMemberId, setSelectedSimMemberId] = useState<string>(members[0]?.id || '');
+  const [timeLeft, setTimeLeft] = useState<number>(intervalSeconds);
+  const [rotationCount, setRotationCount] = useState<number>(1);
+  const [copiedToken, setCopiedToken] = useState<boolean>(false);
 
-  // Dynamic QR rotation ticker
+  // Attendance scanner & manual submission state
+  const [manualToken, setManualToken] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [lastResult, setLastResult] = useState<VerificationResult | null>(null);
+
+  // Verified check-in log from backend
+  const [verifiedCheckIns, setVerifiedCheckIns] = useState<CheckIn[]>(() => {
+    return contextCheckIns.filter((c) => c.eventId === (currentEvent?.id || '1'));
+  });
+
+  // Generate real server QR token from backend endpoint using real numeric event ID
+  const fetchServerQrToken = useCallback(async () => {
+    if (!authToken) {
+      setQrGenerationError('Authentication required to generate QR station.');
+      return;
+    }
+
+    if (!selectedEventId) {
+      return;
+    }
+
+    const numericEventId = Number(selectedEventId);
+    if (isNaN(numericEventId) || numericEventId <= 0) {
+      setQrGenerationError('Please select a valid event.');
+      return;
+    }
+
+    try {
+      setIsGeneratingQr(true);
+      setQrGenerationError(null);
+
+      // Endpoint: POST /attendance/qr/:eventId with real numeric event ID
+      const response = await generateQrToken(numericEventId, authToken);
+      const rawToken = response.token;
+      setServerToken(rawToken);
+
+      // Generate a real scannable QR Code image (Data URL) containing the server token
+      const dataUrl = await QRCode.toDataURL(rawToken, {
+        width: 260,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+        errorCorrectionLevel: 'M',
+      });
+      setQrDataUrl(dataUrl);
+      setTimeLeft(intervalSeconds);
+      setRotationCount((prev) => prev + 1);
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to generate server QR code.';
+      setQrGenerationError(msg);
+      showToast('QR Token Error', msg, 'error');
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  }, [authToken, selectedEventId, intervalSeconds, showToast]);
+
+  // Initial token fetch & whenever event changes
+  useEffect(() => {
+    if (selectedEventId) {
+      fetchServerQrToken();
+    }
+  }, [selectedEventId, fetchServerQrToken]);
+
+  // Countdown timer for automatic rotation
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          // Generate new token hash on rotation
-          const nextHash = `qr_pulse_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString().slice(-4)}`;
-          setTokenHash(nextHash);
-          setRotationCount((c) => c + 1);
+          fetchServerQrToken();
           return intervalSeconds;
         }
         return prev - 1;
@@ -43,33 +142,122 @@ export const QRAttendancePage: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [intervalSeconds]);
+  }, [fetchServerQrToken, intervalSeconds]);
 
-  // Event check-ins
-  const eventCheckIns = checkIns.filter((c) => c.eventId === currentEvent?.id);
+  // Copy token handler
+  const handleCopyToken = () => {
+    if (!serverToken) return;
+    navigator.clipboard.writeText(serverToken);
+    setCopiedToken(true);
+    showToast('Token Copied', 'Active server JWT token copied to clipboard.', 'info');
+    setTimeout(() => setCopiedToken(false), 2500);
+  };
 
-  const handleSimulateScan = () => {
-    if (!currentEvent) return;
+  // Submit token to backend attendance endpoint
+  const processAttendanceToken = async (tokenToSubmit: string, source: 'scanner' | 'manual') => {
+    const trimmed = (tokenToSubmit || '').trim();
+    if (!trimmed) {
+      showToast('Validation Error', 'Please scan or enter a valid QR token.', 'warning');
+      return;
+    }
 
-    if (!selectedSimMemberId) {
-      // Pick random member not yet checked in
-      const unCheckedMembers = members.filter(
-        (m) => !eventCheckIns.some((c) => c.memberId === m.id)
-      );
-      if (unCheckedMembers.length === 0) {
-        showToast('All Checked In', 'Every member on the roster is already checked in!', 'info');
-        return;
+    if (!authToken) {
+      showToast('Auth Error', 'You must be logged in to record attendance.', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const timeStr = new Date().toLocaleTimeString();
+
+    try {
+      // POST /attendance/scan
+      // Source of truth: backend response only!
+      const data = await scanAttendance(trimmed, authToken);
+
+      const verifiedRecord: CheckIn = {
+        id: `chk-${data.attendance?.id || Date.now().toString(36)}`,
+        eventId: selectedEventId,
+        eventName: currentEvent?.title || 'Club Event',
+        memberId: String(data.attendance?.user?.id || currentUser?.id || 'mem-1'),
+        memberName: data.attendance?.user?.name || currentUser?.name || 'Verified Member',
+        studentId: currentUser?.studentId || 'CP-CURRENT',
+        department: currentUser?.department || 'Member',
+        timestamp: timeStr,
+        method: source === 'scanner' ? 'dynamic_qr' : 'manual_override',
+        status: 'verified',
+        tokenHash: trimmed.substring(0, 16) + '...',
+      };
+
+      // Add to verified check-ins list
+      setVerifiedCheckIns((prev) => [verifiedRecord, ...prev]);
+
+      const successResult: VerificationResult = {
+        type: 'success',
+        title: 'Attendance Confirmed!',
+        detail: `Server verified attendance for ${verifiedRecord.memberName} (${verifiedRecord.studentId}) via ${source === 'scanner' ? 'camera scan' : 'manual entry'}.`,
+        timestamp: timeStr,
+      };
+      setLastResult(successResult);
+      showToast('Success', 'Attendance recorded successfully', 'success');
+
+      if (source === 'manual') {
+        setManualToken('');
       }
-      const randomMember = unCheckedMembers[Math.floor(Math.random() * unCheckedMembers.length)];
-      simulateCheckIn(currentEvent.id, randomMember.id);
-    } else {
-      simulateCheckIn(currentEvent.id, selectedSimMemberId);
+    } catch (err: any) {
+      const code = err instanceof AttendanceApiError ? err.code : 'UNKNOWN';
+      const errorMsg = err?.message || 'Failed to record attendance.';
+
+      if (code === 'DUPLICATE_ATTENDANCE') {
+        const warningResult: VerificationResult = {
+          type: 'warning',
+          title: 'Duplicate Attendance Scan',
+          detail: 'You have already marked attendance for this event. Duplicate check-in was rejected by the server.',
+          timestamp: timeStr,
+        };
+        setLastResult(warningResult);
+        showToast('Duplicate Scan', 'Already marked attendance for this event', 'warning');
+      } else if (code === 'EXPIRED_TOKEN') {
+        const errorResult: VerificationResult = {
+          type: 'error',
+          title: 'Expired QR Token',
+          detail: 'The scanned token has expired on the server. Please scan the current active QR code.',
+          timestamp: timeStr,
+        };
+        setLastResult(errorResult);
+        showToast('Expired Token', 'This QR code has expired', 'error');
+      } else if (code === 'INVALID_TOKEN') {
+        const errorResult: VerificationResult = {
+          type: 'error',
+          title: 'Invalid QR Token',
+          detail: 'The submitted QR token is malformed, unrecognized, or untrusted by the server.',
+          timestamp: timeStr,
+        };
+        setLastResult(errorResult);
+        showToast('Invalid QR', errorMsg, 'error');
+      } else {
+        const errorResult: VerificationResult = {
+          type: 'error',
+          title: 'Attendance Verification Failed',
+          detail: errorMsg,
+          timestamp: timeStr,
+        };
+        setLastResult(errorResult);
+        showToast('Error', errorMsg, 'error');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const attendancePercent = currentEvent && currentEvent.capacity > 0
-    ? Math.round((currentEvent.actualAttendance / currentEvent.capacity) * 100)
-    : 0;
+  const handleScanSuccess = async (scannedText: string) => {
+    await processAttendanceToken(scannedText, 'scanner');
+  };
+
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualToken.trim()) return;
+    await processAttendanceToken(manualToken, 'manual');
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -82,377 +270,398 @@ export const QRAttendancePage: React.FC = () => {
               <span className="pulse-indicator" /> Active Session
             </span>
           </div>
-          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem' }}>
-            Project this screen on the venue display. Dynamic QR rotation stops proxy attendance.
+          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Project this screen on the venue display. Dynamic server QR rotation prevents attendance fraud.
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            Select Event:
-          </label>
-          <select
-            className="form-select"
-            style={{ width: 'auto', padding: '0.5rem 0.85rem', fontSize: '0.85rem', minWidth: '240px' }}
-            value={selectedEventId}
-            onChange={(e) => {
-              const newId = e.target.value;
-              setSelectedEventId(newId);
-              const target = events.find((ev) => ev.id === newId);
-              if (target) setTimeLeft(target.qrRefreshInterval);
-            }}
-          >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.status === 'live' ? '🟢 ' : ''}{ev.title} ({ev.date})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Demo Notice Banner */}
-      <div
-        style={{
-          background: 'rgba(99, 102, 241, 0.08)',
-          border: '1px solid rgba(99, 102, 241, 0.25)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '0.85rem 1.25rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          fontSize: '0.825rem',
-          color: '#818cf8'
-        }}
-      >
-        <Sparkles size={18} style={{ flexShrink: 0 }} />
-        <span>
-          <strong>Anti-Proxy Architecture:</strong> Every {intervalSeconds} seconds, a new cryptographic token is minted with a rolling timestamp. Offline photos or forwarded screenshots will fail server-side window verification.
-        </span>
-      </div>
-
-      {/* Main Grid: QR Display Box & Real-Time Check-In Feed */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.75rem' }}>
-        {/* Left: Dynamic QR Projection Screen */}
-        <div
-          className="card"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textAlign: 'center',
-            padding: '2rem 1.5rem',
-            background: 'var(--bg-secondary)',
-            borderColor: 'var(--border-default)',
-            boxShadow: 'var(--shadow-lg)'
-          }}
-        >
-          <div style={{ marginBottom: '1rem', width: '100%' }}>
-            <Badge variant="brand" style={{ marginBottom: '0.5rem' }}>
-              {currentEvent?.category || 'Workshop'}
-            </Badge>
-            <h2 style={{ fontSize: '1.35rem', margin: '0 0 0.25rem 0' }}>
-              {currentEvent?.title}
-            </h2>
-            <div style={{ fontSize: '0.825rem', color: 'var(--text-dim)' }}>
-              {currentEvent?.location} &bull; {currentEvent?.time}
-            </div>
-          </div>
-
-          {/* High-Contrast Dynamic QR Matrix Display */}
-          <div
-            style={{
-              position: 'relative',
-              background: '#ffffff',
-              padding: '1.25rem',
-              borderRadius: 'var(--radius-xl)',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',
-              margin: '1rem 0 1.25rem 0',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center'
-            }}
-          >
-            {/* SVG Visual QR Matrix */}
-            <svg
-              width="210"
-              height="210"
-              viewBox="0 0 210 210"
-              style={{ display: 'block' }}
-            >
-              {/* Background */}
-              <rect width="210" height="210" fill="#ffffff" rx="8" />
-
-              {/* Corner Position Detection Squares (Top-Left, Top-Right, Bottom-Left) */}
-              {/* Top-Left */}
-              <rect x="15" y="15" width="46" height="46" fill="#000000" rx="4" />
-              <rect x="23" y="23" width="30" height="30" fill="#ffffff" rx="2" />
-              <rect x="29" y="29" width="18" height="18" fill="#000000" rx="2" />
-
-              {/* Top-Right */}
-              <rect x="149" y="15" width="46" height="46" fill="#000000" rx="4" />
-              <rect x="157" y="23" width="30" height="30" fill="#ffffff" rx="2" />
-              <rect x="163" y="29" width="18" height="18" fill="#000000" rx="2" />
-
-              {/* Bottom-Left */}
-              <rect x="15" y="149" width="46" height="46" fill="#000000" rx="4" />
-              <rect x="23" y="157" width="30" height="30" fill="#ffffff" rx="2" />
-              <rect x="29" y="163" width="18" height="18" fill="#000000" rx="2" />
-
-              {/* Dynamic Data Cells influenced by rotation count */}
-              {[
-                { x: 70, y: 20, w: 10, h: 10 },
-                { x: 90, y: 20, w: 10, h: 10 },
-                { x: 110, y: 20, w: 10, h: 10 },
-                { x: 130, y: 20, w: 10, h: 10 },
-                { x: 70, y: 40, w: 20, h: 10 },
-                { x: 100, y: 40, w: 10, h: 20 },
-                { x: 120, y: 40, w: 20, h: 10 },
-                { x: 20, y: 70, w: 10, h: 20 },
-                { x: 40, y: 70, w: 20, h: 10 },
-                { x: 70, y: 70, w: 10, h: 10 },
-                { x: 90, y: 70, w: 30, h: 10 },
-                { x: 130, y: 70, w: 10, h: 20 },
-                { x: 150, y: 70, w: 20, h: 10 },
-                { x: 180, y: 70, w: 10, h: 20 },
-                { x: 20, y: 100, w: 20, h: 10 },
-                { x: 50, y: 100, w: 10, h: 20 },
-                { x: 70, y: 90, w: 20, h: 20 },
-                { x: 100, y: 100, w: 10, h: 10 },
-                { x: 120, y: 90, w: 20, h: 20 },
-                { x: 150, y: 100, w: 10, h: 10 },
-                { x: 170, y: 100, w: 20, h: 10 },
-                { x: 20, y: 130, w: 10, h: 10 },
-                { x: 40, y: 130, w: 20, h: 10 },
-                { x: 70, y: 120, w: 20, h: 10 },
-                { x: 100, y: 120, w: 10, h: 20 },
-                { x: 120, y: 130, w: 20, h: 10 },
-                { x: 150, y: 120, w: 20, h: 20 },
-                { x: 180, y: 130, w: 10, h: 10 },
-                { x: 70, y: 150, w: 10, h: 20 },
-                { x: 90, y: 150, w: 20, h: 10 },
-                { x: 120, y: 150, w: 10, h: 10 },
-                { x: 140, y: 150, w: 20, h: 20 },
-                { x: 170, y: 150, w: 10, h: 10 },
-                { x: 70, y: 180, w: 20, h: 10 },
-                { x: 100, y: 170, w: 20, h: 10 },
-                { x: 130, y: 180, w: 20, h: 10 },
-                { x: 160, y: 180, w: 10, h: 10 },
-                { x: 180, y: 170, w: 10, h: 20 },
-                // dynamic center marker that shifts color/position slightly with rotationCount
-                { x: 95, y: 80, w: 20, h: 20 }
-              ].map((rect, i) => (
-                <rect
-                  key={i}
-                  x={rect.x}
-                  y={rect.y}
-                  width={rect.w}
-                  height={rect.h}
-                  fill={i % 3 === (rotationCount % 3) ? '#4f46e5' : '#000000'}
-                  rx="1"
-                />
-              ))}
-
-              {/* ClubPulse Center Logo Badge in QR */}
-              <rect x="85" y="85" width="40" height="40" fill="#ffffff" rx="6" />
-              <rect x="88" y="88" width="34" height="34" fill="#0f1420" rx="4" />
-              <text
-                x="105"
-                y="110"
-                fill="#818cf8"
-                fontSize="14"
-                fontWeight="800"
-                textAnchor="middle"
-                fontFamily="var(--font-sans)"
-              >
-                CP
-              </text>
-            </svg>
-          </div>
-
-          {/* Countdown Ring & Rotation Metas */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '50%',
-                border: '3px solid rgba(99, 102, 241, 0.2)',
-                borderTopColor: 'var(--brand-500)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '0.9rem',
-                color: 'var(--brand-500)',
-                fontFamily: 'var(--font-mono)'
+        {events.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <label htmlFor="event-selector" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+              Select Event:
+            </label>
+            <select
+              id="event-selector"
+              className="form-select"
+              style={{ width: 'auto', padding: '0.5rem 0.85rem', fontSize: '0.85rem', minWidth: '240px' }}
+              value={selectedEventId}
+              onChange={(e) => {
+                const newId = e.target.value;
+                setSelectedEventId(newId);
+                const target = events.find((ev) => ev.id === newId);
+                if (target) setTimeLeft(target.qrRefreshInterval);
               }}
             >
-              {timeLeft}s
-            </div>
-
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                Rotating in {timeLeft} seconds
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                Hash: {tokenHash.slice(0, 18)}... (Rotation #{rotationCount})
-              </div>
-            </div>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.status === 'live' ? '🟢 ' : ''}[#{ev.id}] {ev.title} ({ev.date})
+                </option>
+              ))}
+            </select>
           </div>
+        )}
+      </div>
 
-          {/* Attendance Counter Card */}
-          <div
-            style={{
-              width: '100%',
-              padding: '1rem',
-              borderRadius: 'var(--radius-lg)',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              marginBottom: '1.5rem'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-              <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>Verified Check-Ins</span>
-              <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>
-                {currentEvent?.actualAttendance} / {currentEvent?.capacity}
-              </span>
-            </div>
+      {/* No Events Empty State */}
+      {!isLoadingEvents && events.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem', color: 'var(--text-dim)' }}>
+          <Calendar size={40} style={{ margin: '0 auto 1rem auto', opacity: 0.35 }} />
+          <h3 style={{ fontSize: '1.15rem', margin: '0 0 0.5rem 0', color: 'var(--text-main)', fontWeight: 700 }}>
+            No Scheduled Events Found
+          </h3>
+          <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: 0 }}>
+            Create an event in the Event Hub to broadcast a live QR code station and scan member attendance.
+          </p>
+        </div>
+      )}
 
-            <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+      {/* Main Two-Column Layout */}
+      {events.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 460px) 1fr', gap: '1.75rem', alignItems: 'start' }}>
+          {/* Left Column: Real Server QR Generation + Camera Scanner & Fallback */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {/* Card: Dynamic Server QR Broadcaster */}
+            <div className="card" style={{ textAlign: 'center', padding: '1.75rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.8rem', color: 'var(--brand-400)', fontWeight: 700 }}>
+                  <ShieldCheck size={16} /> Server QR Token (Event #{currentEvent?.id})
+                </div>
+                <span className="badge badge-brand">Rotation #{rotationCount}</span>
+              </div>
+
+              <h3 style={{ fontSize: '1.2rem', margin: '0 0 0.35rem 0', fontWeight: 700 }}>
+                {currentEvent?.title || 'Club Session'}
+              </h3>
+              <p style={{ fontSize: '0.785rem', color: 'var(--text-muted)', margin: '0 0 1rem 0' }}>
+                Venue: {currentEvent?.location || 'Main Auditorium'} &bull; Scan using phone camera
+              </p>
+
+              {/* REAL Scannable QR Code Canvas / Image Display */}
               <div
                 style={{
-                  height: '100%',
-                  width: `${Math.min(100, attendancePercent)}%`,
-                  backgroundColor: 'var(--success)',
-                  borderRadius: '999px',
-                  transition: 'width 0.4s ease'
+                  background: '#ffffff',
+                  padding: '1.25rem',
+                  borderRadius: 'var(--radius-xl)',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',
+                  margin: '0.5rem 0 1rem 0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: '260px',
+                  minWidth: '260px',
                 }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: '0.45rem' }}>
-              <span>Capacity utilization: <strong>{attendancePercent}%</strong></span>
-              <span>Points: <strong>+{currentEvent?.pointsAwarded} XP</strong></span>
-            </div>
-          </div>
-
-          {/* Interactive Simulation Controls for Judges / Presentation */}
-          <div
-            style={{
-              width: '100%',
-              padding: '1rem',
-              borderRadius: 'var(--radius-lg)',
-              background: 'rgba(99, 102, 241, 0.06)',
-              border: '1px dashed rgba(99, 102, 241, 0.3)',
-              textAlign: 'left'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.825rem', fontWeight: 700, color: '#818cf8', marginBottom: '0.5rem' }}>
-              <Zap size={14} /> Hackathon Live Demo Simulator
-            </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem', lineHeight: 1.4 }}>
-              Select a club member to simulate their phone scanning this dynamic QR code:
-            </p>
-
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <select
-                className="form-select"
-                style={{ fontSize: '0.785rem', padding: '0.45rem 0.65rem' }}
-                value={selectedSimMemberId}
-                onChange={(e) => setSelectedSimMemberId(e.target.value)}
               >
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({m.studentId})
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={handleSimulateScan}
-                className="btn btn-primary btn-sm"
-                style={{ whiteSpace: 'nowrap' }}
-              >
-                Scan Now
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Live Stream of Check-Ins */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div className="pulse-indicator" />
-              <h3 style={{ fontSize: '1.15rem', margin: 0 }}>Real-Time Attendance Feed</h3>
-            </div>
-            <span className="badge badge-brand">{eventCheckIns.length} Verified</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1, overflowY: 'auto', maxHeight: '580px' }}>
-            {eventCheckIns.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-dim)' }}>
-                <QrCode size={40} style={{ margin: '0 auto 1rem auto', opacity: 0.4 }} />
-                <p>Waiting for first check-in...</p>
-                <span style={{ fontSize: '0.78rem' }}>Click "Scan Now" to simulate a student check-in!</span>
+                {isGeneratingQr && !qrDataUrl ? (
+                  <div style={{ color: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                    <RefreshCw size={32} className="spin" color="#6366f1" />
+                    <span style={{ fontSize: '0.825rem', fontWeight: 600 }}>Signing QR Token...</span>
+                  </div>
+                ) : qrGenerationError ? (
+                  <div style={{ color: '#dc2626', padding: '1rem', textAlign: 'center', maxWidth: '240px' }}>
+                    <AlertCircle size={32} style={{ margin: '0 auto 0.5rem auto' }} />
+                    <div style={{ fontSize: '0.825rem', fontWeight: 600 }}>Generation Error</div>
+                    <p style={{ fontSize: '0.72rem', margin: '0.25rem 0 0.75rem 0' }}>{qrGenerationError}</p>
+                    <button type="button" onClick={fetchServerQrToken} className="btn btn-sm btn-primary">
+                      Retry
+                    </button>
+                  </div>
+                ) : qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="Server-Generated Event QR Code"
+                    style={{ width: '230px', height: '230px', display: 'block', borderRadius: '4px' }}
+                  />
+                ) : (
+                  <div style={{ color: '#64748b', fontSize: '0.825rem' }}>No active QR code</div>
+                )}
               </div>
-            ) : (
-              eventCheckIns.map((item) => (
+
+              {/* Rotation Countdown & Manual Refresh */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div
-                  key={item.id}
                   style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    border: '3px solid rgba(99, 102, 241, 0.2)',
+                    borderTopColor: 'var(--brand-500)',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.85rem 1rem',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    border: '1px solid var(--border-subtle)',
-                    animation: 'fadeIn 0.3s ease-out'
+                    justifyContent: 'center',
+                    fontWeight: 800,
+                    fontSize: '0.85rem',
+                    fontFamily: 'var(--font-mono)',
+                    color: timeLeft <= 3 ? '#ef4444' : 'var(--brand-400)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                    <div
-                      style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '50%',
-                        background: 'rgba(16, 185, 129, 0.15)',
-                        color: 'var(--success)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.825rem'
-                      }}
-                    >
-                      {item.memberName.charAt(0)}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-main)' }}>
-                        {item.memberName}
-                      </div>
-                      <div style={{ fontSize: '0.745rem', color: 'var(--text-dim)' }}>
-                        {item.studentId} &bull; {item.department}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: 'right' }}>
-                    <Badge variant="success" icon={<CheckCircle2 size={11} />}>
-                      Verified
-                    </Badge>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '0.2rem', fontFamily: 'var(--font-mono)' }}>
-                      {item.timestamp}
-                    </div>
+                  {timeLeft}s
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontSize: '0.785rem', fontWeight: 600 }}>Auto-Refreshing QR Token</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                    Server JWT rotates every {intervalSeconds}s
                   </div>
                 </div>
-              ))
-            )}
+
+                <button
+                  type="button"
+                  onClick={fetchServerQrToken}
+                  disabled={isGeneratingQr}
+                  className="btn btn-secondary btn-sm"
+                  style={{ marginLeft: 'auto', padding: '0.35rem 0.65rem' }}
+                  title="Force refresh token"
+                >
+                  <RefreshCw size={13} className={isGeneratingQr ? 'spin' : ''} />
+                </button>
+              </div>
+
+              {/* Token preview & Copy button for testing */}
+              <div
+                style={{
+                  width: '100%',
+                  background: 'rgba(0, 0, 0, 0.25)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.65rem 0.85rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                }}
+              >
+                <div style={{ textAlign: 'left', overflow: 'hidden' }}>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Server JWT Signature
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-muted)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '240px',
+                    }}
+                    title={serverToken}
+                  >
+                    {serverToken ? `${serverToken.substring(0, 24)}...` : 'Generating...'}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCopyToken}
+                  disabled={!serverToken}
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.55rem' }}
+                  title="Copy token to test manual fallback"
+                >
+                  {copiedToken ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Card: Real Camera Scanner */}
+            <div className="card" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.75rem' }}>
+                <QrCode size={16} color="var(--brand-400)" />
+                <span>Camera-Based Attendance Scanner</span>
+              </div>
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0 0 1rem 0', lineHeight: 1.4 }}>
+                Point the device camera at an attendee&apos;s digital pass or dynamic event QR code. The token is submitted directly to the backend for cryptographic validation.
+              </p>
+
+              <QRScanner onScanSuccess={handleScanSuccess} isProcessing={isSubmitting} />
+
+              {/* Server Verification Result Box */}
+              {lastResult && (
+                <div
+                  style={{
+                    marginTop: '1rem',
+                    padding: '0.85rem 1rem',
+                    borderRadius: 'var(--radius-md)',
+                    background:
+                      lastResult.type === 'success'
+                        ? 'rgba(16, 185, 129, 0.1)'
+                        : lastResult.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.1)'
+                        : 'rgba(239, 68, 68, 0.1)',
+                    border: `1px solid ${
+                      lastResult.type === 'success'
+                        ? 'rgba(16, 185, 129, 0.3)'
+                        : lastResult.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.3)'
+                        : 'rgba(239, 68, 68, 0.3)'
+                    }`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.25rem' }}>
+                    {lastResult.type === 'success' && <CheckCircle2 size={15} color="var(--success)" />}
+                    {lastResult.type === 'warning' && <AlertTriangle size={15} color="#f59e0b" />}
+                    {lastResult.type === 'error' && <AlertCircle size={15} color="#ef4444" />}
+                    <span
+                      style={{
+                        fontSize: '0.825rem',
+                        fontWeight: 700,
+                        color:
+                          lastResult.type === 'success'
+                            ? 'var(--success)'
+                            : lastResult.type === 'warning'
+                            ? '#f59e0b'
+                            : '#ef4444',
+                      }}
+                    >
+                      {lastResult.title}
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginLeft: 'auto' }}>
+                      {lastResult.timestamp}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-main)', lineHeight: 1.4 }}>
+                    {lastResult.detail}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Card: Clearly Labelled Manual Token Entry Fallback */}
+            <div className="card" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.4rem' }}>
+                <Keyboard size={16} color="var(--brand-400)" />
+                <span>Manual Token Entry Fallback</span>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0 0 0.85rem 0', lineHeight: 1.4 }}>
+                If camera access is unavailable or denied, paste or type the QR JWT token manually to submit to the backend attendance validation endpoint.
+              </p>
+
+              <form onSubmit={handleManualSubmit} style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', flex: 1 }}
+                  placeholder="Enter QR token manually (e.g. eyJhbGci...)"
+                  value={manualToken}
+                  onChange={(e) => setManualToken(e.target.value)}
+                  disabled={isSubmitting}
+                />
+                <button
+                  type="submit"
+                  disabled={!manualToken.trim() || isSubmitting}
+                  className="btn btn-primary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', whiteSpace: 'nowrap' }}
+                >
+                  {isSubmitting ? (
+                    <RefreshCw size={13} className="spin" />
+                  ) : (
+                    <Send size={13} />
+                  )}
+                  <span>Submit</span>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Right Column: Real-Time Verified Attendance Feed */}
+          <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="pulse-indicator" />
+                <h3 style={{ fontSize: '1.15rem', margin: 0, fontWeight: 700 }}>Real-Time Attendance Feed</h3>
+              </div>
+              <span className="badge badge-brand">{verifiedCheckIns.length} Server-Verified</span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.75rem',
+                flex: 1,
+                overflowY: 'auto',
+                maxHeight: '680px',
+              }}
+            >
+              {verifiedCheckIns.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-dim)' }}>
+                  <QrCode size={40} style={{ margin: '0 auto 1rem auto', opacity: 0.3 }} />
+                  <p style={{ margin: 0, fontWeight: 600 }}>Waiting for verified check-in...</p>
+                  <span style={{ fontSize: '0.78rem' }}>
+                    Scan a QR code with the camera above or submit a token manually.
+                  </span>
+                </div>
+              ) : (
+                verifiedCheckIns.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.85rem 1rem',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid var(--border-subtle)',
+                      animation: 'fadeIn 0.3s ease-out',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          color: 'var(--success)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.825rem',
+                        }}
+                      >
+                        {item.memberName.charAt(0)}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-main)' }}>
+                          {item.memberName}
+                        </div>
+                        <div style={{ fontSize: '0.745rem', color: 'var(--text-dim)' }}>
+                          {item.studentId} &bull; {item.department} &bull;{' '}
+                          <span style={{ color: 'var(--brand-400)' }}>
+                            {item.method === 'dynamic_qr' ? 'Camera Scan' : 'Manual Entry'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right' }}>
+                      <Badge variant="success" icon={<CheckCircle2 size={11} />}>
+                        Verified
+                      </Badge>
+                      <div
+                        style={{
+                          fontSize: '0.72rem',
+                          color: 'var(--text-dim)',
+                          marginTop: '0.2rem',
+                          fontFamily: 'var(--font-mono)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'flex-end',
+                          gap: '0.25rem',
+                        }}
+                      >
+                        <Clock size={11} /> {item.timestamp}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
