@@ -16,6 +16,7 @@ import { User } from './users/entities/user.entity.js';
       entities: [User],
       synchronize: true, // Auto-create tables (dev only)
     }),
+    TypeOrmModule.forFeature([User]),
     UsersModule,
     AuthModule,
   ],

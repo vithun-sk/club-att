@@ -7,7 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -38,11 +38,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('clubpulse_user', JSON.stringify(data.user));
   };
 
-  const register = async (email: string, password: string) => {
+  const register = async (name: string, email: string, password: string) => {
     const response = await fetch('http://localhost:3000/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ name, email, password }),
     });
 
     const data = await response.json();

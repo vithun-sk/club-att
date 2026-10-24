@@ -35,6 +35,7 @@ export class UsersService {
     const newUser = this.usersRepository.create({
       email: emailTrimmed,
       password: hashedPassword,
+      name: user.name || 'New Member',
       role: Role.USER, // Hardcoded to USER for public registrations
     });
 

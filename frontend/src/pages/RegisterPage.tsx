@@ -13,19 +13,31 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
   const { showToast } = useToast();
 
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      showToast('Missing Fields', 'Please enter email and password.', 'error');
+    if (!name.trim() || !email.trim() || !password || !confirmPassword) {
+      showToast('Missing Fields', 'Please fill in all required fields.', 'error');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      showToast('Password Mismatch', 'Passwords do not match. Please re-enter.', 'error');
+      return;
+    }
+
+    if (password.length < 6) {
+      showToast('Password Too Short', 'Password must be at least 6 characters long.', 'error');
       return;
     }
 
     setIsLoading(true);
     try {
-      await register(email, password);
+      await register(name, email, password);
       showToast('Registration Successful', 'Account created! Public accounts receive User role by default.', 'success');
     } catch (err: any) {
       showToast('Registration Failed', err.message || 'Error creating account', 'error');
@@ -78,6 +90,21 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
+            <label className="form-label">Full Name</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.4rem' }}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
             <label className="form-label">Email Address</label>
             <div style={{ position: 'relative' }}>
               <input
@@ -90,6 +117,46 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                 placeholder="name@campus.edu"
               />
               <Mail
+                size={16}
+                color="var(--text-dim)"
+                style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="password"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.4rem' }}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+              />
+              <Lock
+                size={16}
+                color="var(--text-dim)"
+                style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Confirm Password</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="password"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.4rem' }}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••••••"
+              />
+              <Lock
                 size={16}
                 color="var(--text-dim)"
                 style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}

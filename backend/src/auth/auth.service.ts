@@ -22,6 +22,7 @@ export class AuthService {
     const user = await this.usersService.create({
       email: registerDto.email,
       password: registerDto.password,
+      name: registerDto.name,
       role: Role.USER, // Public registration always forces USER role
     });
 
