@@ -164,26 +164,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type="password"
-                required
-                className="form-input"
-                style={{ paddingLeft: '2.4rem' }}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-              />
-              <Lock
-                size={16}
-                color="var(--text-dim)"
-                style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}
-              />
-            </div>
-          </div>
-
           <button
             type="submit"
             disabled={isLoading}
