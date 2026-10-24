@@ -1,0 +1,1 @@
+- [ClubPulse](C:/Users/Vithun/.claude/projects/C--Users-Vithun-OneDrive-Desktop-stack/memory/clubpulse.md) — project
