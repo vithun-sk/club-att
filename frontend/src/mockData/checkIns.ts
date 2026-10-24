@@ -1,0 +1,121 @@
+import type { CheckIn } from '../types';
+
+export const INITIAL_CHECKINS: CheckIn[] = [
+  {
+    id: 'chk-101',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-6',
+    memberName: 'Kavya Nair',
+    studentId: 'CS2025-003',
+    department: 'Computer Science',
+    timestamp: '17:31:02',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_9f3b821a_seq41'
+  },
+  {
+    id: 'chk-102',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-10',
+    memberName: 'Pooja Reddy',
+    studentId: 'CS2024-201',
+    department: 'Computer Science',
+    timestamp: '17:33:41',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_9f3b821a_seq42'
+  },
+  {
+    id: 'chk-103',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-1',
+    memberName: 'Aarav Sharma',
+    studentId: 'CS2023-042',
+    department: 'Computer Science',
+    timestamp: '17:35:12',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_e12b7740_seq43'
+  },
+  {
+    id: 'chk-104',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-12',
+    memberName: 'Meera Chawla',
+    studentId: 'AI2023-098',
+    department: 'Artificial Intelligence',
+    timestamp: '17:36:15',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_e12b7740_seq43'
+  },
+  {
+    id: 'chk-105',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-4',
+    memberName: 'Ananya Iyer',
+    studentId: 'AI2024-015',
+    department: 'Artificial Intelligence',
+    timestamp: '17:39:55',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_c50d9931_seq44'
+  },
+  {
+    id: 'chk-106',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-2',
+    memberName: 'Diya Patel',
+    studentId: 'CS2023-118',
+    department: 'Data Science',
+    timestamp: '17:41:09',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_c50d9931_seq44'
+  },
+  {
+    id: 'chk-107',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-8',
+    memberName: 'Sneha Kulkarni',
+    studentId: 'CS2023-144',
+    department: 'Computer Science',
+    timestamp: '17:44:19',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_a87f1190_seq45'
+  },
+  {
+    id: 'chk-108',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-5',
+    memberName: 'Vikram Sengupta',
+    studentId: 'DS2024-061',
+    department: 'Data Science',
+    timestamp: '17:48:20',
+    method: 'dynamic_qr',
+    status: 'verified',
+    tokenHash: 'qr_tok_4d6c291b_seq46'
+  },
+  {
+    id: 'chk-109',
+    eventId: 'ev-1',
+    eventName: 'Full-Stack Next.js 15 & Server Actions Workshop',
+    memberId: 'mem-9',
+    memberName: 'Aditya Rao',
+    studentId: 'IT2024-032',
+    department: 'Information Tech',
+    timestamp: '17:52:11',
+    method: 'manual_override',
+    status: 'flagged',
+    tokenHash: 'manual_override_admin_bypass'
+  }
+];
